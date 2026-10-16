@@ -18,17 +18,27 @@
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { resolve } from "node:path";
+
+// Sibling checkouts. Resolved against the ORACLE_ROOT env var, or the
+// parent of this file, so the runner works from any CWD -- execFileSync
+// resolves a relative `cwd` against the parent's CWD, not the script's.
+const ROOT = process.env.ORACLE_ROOT
+  ? resolve(process.env.ORACLE_ROOT)
+  : resolve(new URL(".", import.meta.url).pathname, "..");
+const sib = (n) => resolve(ROOT, n);
 
 const PORTS = [
-  { name: "doctor", dir: "../gitpp-doctor", kind: "both" },
-  { name: "js",     dir: "../gitpp-js",     kind: "both" },
-  { name: "cs",     dir: "../gitpp-cs",     kind: "both" },
-  { name: "pl",     dir: "../gitpp-pl",     kind: "both" },
-  { name: "c",      dir: "../gitpp-c",      kind: "leaf" },
+  { name: "doctor", dir: sib("gitpp-doctor"), kind: "both" },
+  { name: "js",     dir: sib("gitpp-js"),     kind: "both" },
+  { name: "cs",     dir: sib("gitpp-cs"),     kind: "both" },
+  { name: "pl",     dir: sib("gitpp-pl"),     kind: "both" },
+  { name: "c",      dir: sib("gitpp-c"),      kind: "leaf" },
 ];
 const SUITES = {
-  leaf: { dir: "../gitpp-cross-port", cmd: ["fuzz.mjs"], args: [process.env.ORACLE_CORPUS || "/tmp/records-500.json"] },
-  fold: { dir: "../gitpp-fold-conformance", cmd: ["run.mjs"], args: [] },
+  leaf: { dir: sib("gitpp-cross-port"),       bin: "node", script: "fuzz.mjs",
+          args: [process.env.ORACLE_CORPUS || "/tmp/oracle-corpus.json"] },
+  fold: { dir: sib("gitpp-fold-conformance"), bin: "node", script: "run.mjs", args: [] },
 };
 
 function sha(dir) {
@@ -36,14 +46,14 @@ function sha(dir) {
     return execFileSync("git", ["-C", dir, "rev-parse", "--short", "HEAD"], { encoding: "utf8" }).trim();
   } catch { return "unknown"; }
 }
-function tryRun(cwd, cmd, args = [], timeout = 900_000) {
+function tryRun(cwd, bin, args = [], timeout = parseInt(process.env.ORACLE_TIMEOUT_MS || "1800000", 10)) {
   try {
-    const out = execFileSync(cmd[0], cmd.slice(1).concat(args), {
+    const out = execFileSync(bin, args, {
       cwd, encoding: "utf8", timeout, maxBuffer: 1 << 26,
     });
     return { ok: true, out, code: 0 };
   } catch (e) {
-    return { ok: false, out: `${e.stdout || ""}${e.stderr || ""}`, code: e.status ?? -1 };
+    return { ok: false, out: `${e.stdout || ""}${e.stderr || ""}`, code: e.status ?? -1, err: e.code || String(e.message).slice(0,120) };
   }
 }
 
@@ -94,11 +104,11 @@ export function runOnce({ ledgerPath = "ledger.jsonl", knownPath = "known-limita
       continue;
     }
     const t0 = Date.now();
-    const r = tryRun([suite.dir, ...suite.cmd], suite.args ?? []);
+    const r = tryRun(suite.dir, suite.bin, [suite.script, ...(suite.args ?? [])]);
     const counts = parseCounts(r.out);
     const status = classify(counts, "suite");
     entry.suites[kind] = { ...counts, status, exit: r.code, ms: Date.now() - t0,
-                           tail: r.out.trim().split("\n").slice(-3).join(" | ").slice(0, 300) };
+                           tail: (r.out || "").trim().split("\n").slice(-3).join(" | ").slice(0, 300), err: r.err || null };
 
     const bad = kind === "fold" ? (counts.fail ?? 0) > 0 : (counts.disagree ?? 0) > 0;
     if (status === "error") { failed = true; entry.newDivergences.push(`${kind}: suite errored, exit ${r.code}`); }

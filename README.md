@@ -87,7 +87,16 @@ node oracle.mjs ledger           # summary
 ```
 
 `ORACLE_CORPUS` selects the corpus for the leaf suite (default
-`/tmp/records-500.json`).
+`/tmp/oracle-corpus.json`, 500 records). `ORACLE_TIMEOUT_MS` sets the
+per-suite timeout (default 1,800,000 = 30 min).
+
+**Corpus size is the throughput knob, and it bites.** The first real run
+used the full 20,043-record corpus: fold came back green in 27.8s while
+leaf hit the 15-minute timeout and was reported as a failure. That is
+the fail-closed contract working — an unrunnable suite is a failure,
+not a pass — but it also means a full-corpus pass needs a longer
+timeout or a batched runner, and until then the honest cadence is a
+500-record sample on a short cycle plus a full sweep on a long one.
 
 ## What hardware would add
 
@@ -114,3 +123,10 @@ Designed for a machine that has not arrived. Concretely:
   parser update. Deliberate: a silent parse failure would be worse.
 - The `c` port has no `derive()`, so it is excluded from the fold suite by
   construction rather than by a check.
+- **The fold suite it shells out to had its own defects.** For several
+  rounds `gitpp-fold-conformance/run.mjs` had `ROOT` hardcoded to a scratch
+  directory, so the suite in the repo was not the suite under test, and it
+  stripped `setters` values out of the comparison, so the §5.6 case could not
+  fail. Both are fixed; both were found by the `gitpp-fold-conformance`
+  negative control, not by this oracle. **An oracle inherits the blind spots
+  of whatever it shells out to.**
