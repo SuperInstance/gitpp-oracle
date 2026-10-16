@@ -1,0 +1,15 @@
+{
+  "version": "0.1.0",
+  "note": "Divergences that are KNOWN, CHARACTERISED and ACCEPTED. The oracle exits 0 while these persist and non-zero the moment anything NEW appears. This is the contract that lets continuous running be useful: a permanently-known edge case must not silence a real regression, and a known one must not cry wolf every cycle.",
+  "limitations": [
+    {
+      "id": "perl-float64-domain",
+      "port": "pl",
+      "class": "bare integer literal in [2^63, 1e21)",
+      "statement": "gitpp-pl diverges on bare integer literals in [2^63, 1e21). JSON::PP returns such a literal as a plain string (too large for a UV/IV) or as an exact int64 (which fits), and neither is distinguishable from a genuine JSON string, so the port cannot recover the float64 the spec requires. A port that does recover it (python, js, c, c#) emits 7.248182946264744e+20 where Perl emits a quoted string.",
+      "why_not_fixed": "The information is destroyed by the decoder. Recovery needs a JSON parser that records per value whether the source text was a bare number or a quoted string, i.e. tokenising the input rather than calling JSON::PP. That is a real piece of work, not a patch.",
+      "introduced": "gitpp-pl v0.1.7",
+      "blocks_green": true
+    }
+  ]
+}

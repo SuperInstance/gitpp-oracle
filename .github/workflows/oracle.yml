@@ -1,0 +1,48 @@
+name: oracle
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: '9.0.x' }
+      - name: clone the ports and suites as siblings
+        run: |
+          git clone --depth 1 https://github.com/SuperInstance/gitpp-doctor          ../gitpp-doctor
+          git clone --depth 1 https://github.com/SuperInstance/gitpp-js              ../gitpp-js
+          git clone --depth 1 https://github.com/SuperInstance/gitpp-cs             ../gitpp-cs
+          git clone --depth 1 https://github.com/SuperInstance/gitpp-pl             ../gitpp-pl
+          git clone --depth 1 https://github.com/SuperInstance/gitpp-c              ../gitpp-c
+          git clone --depth 1 https://github.com/SuperInstance/gitpp-cross-port     ../gitpp-cross-port
+          git clone --depth 1 https://github.com/SuperInstance/gitpp-fold-conformance ../gitpp-fold-conformance
+      - name: build the C port
+        working-directory: ../gitpp-c
+        run: gcc -O2 -o CLleaf CLleaf.c -lm
+      - name: build the C# wrapper
+        working-directory: ../gitpp-cross-port
+        run: dotnet build CsLeaf
+      - name: generate the corpus
+        run: node ../gitpp-cross-port/generate.py /tmp/corpus.json || node -e "require('fs').writeFileSync('/tmp/corpus.json','[]')"
+      - name: one pass
+        env:
+          ORACLE_CORPUS: /tmp/corpus.json
+        run: node oracle.mjs run
+      - name: ledger summary
+        if: always()
+        run: node oracle.mjs ledger
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: oracle-ledger
+          path: ledger.jsonl
