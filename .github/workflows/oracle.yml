@@ -88,14 +88,14 @@ jobs:
         # the job fails.
         run: |
           python3 ../gitpp-cross-port/generate.py /tmp/corpus.json
-          python3 -c "
-import json, sys
-recs = json.load(open('/tmp/corpus.json'))
-print('  %d record(s) in the corpus' % len(recs))
-if len(recs) < 1000:
-    print('FAIL: the corpus has only %d record(s)' % len(recs))
-    sys.exit(1)
-"
+                    python3 -c "
+          import json, sys
+          recs = json.load(open('/tmp/corpus.json'))
+          print('  %d record(s) in the corpus' % len(recs))
+          if len(recs) < 1000:
+              print('FAIL: the corpus has only %d record(s)' % len(recs))
+              sys.exit(1)
+          "
       - name: one pass
         env:
           ORACLE_CORPUS: /tmp/corpus.json
