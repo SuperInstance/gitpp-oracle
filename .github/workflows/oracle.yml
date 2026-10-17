@@ -39,9 +39,25 @@ jobs:
           git clone --depth 1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/SuperInstance/gitpp-c            ../gitpp-c
           git clone --depth 1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/SuperInstance/gitpp-cross-port   ../gitpp-cross-port
           git clone --depth 1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/SuperInstance/gitpp-fold-conformance ../gitpp-fold-conformance
-      - name: build the C port
-        working-directory: ../gitpp-c
+      - name: build the C leaf wrapper
+        # CLleaf.c lives in gitpp-cross-port, NOT in gitpp-c. The step
+        # compiled it in ../gitpp-c and died with
+        #
+        #   cc1: fatal error: CLleaf.c: No such file or directory
+        #
+        # The oracle's LEAF suite is gitpp-cross-port/fuzz.mjs, and the
+        # C binary it drives is gitpp-cross-port/CLleaf.
+        working-directory: ../gitpp-cross-port
         run: gcc -O2 -o CLleaf CLleaf.c -lm
+      - name: build the C port from source
+        # The repo ships a COMMITTED binary. A stale committed binary
+        # would be the wrong build, and the participant's version is
+        # recorded from this checkout.
+        working-directory: ../gitpp-c
+        run: |
+          make clean
+          make
+          test -x ./gitpp
       - name: build the C# wrapper
         working-directory: ../gitpp-cross-port
         run: dotnet build CsLeaf
@@ -54,10 +70,32 @@ jobs:
           test -f ../gitpp-js/src/gitpp.js
           test -f ../gitpp-pl/lib/Gitpp.pm
           test -f ../gitpp-c/gitpp
+          test -x ../gitpp-cross-port/CLleaf
           test -d ../gitpp-fold-conformance
           echo "  all participants present"
       - name: generate the corpus
-        run: node ../gitpp-cross-port/generate.py /tmp/corpus.json || node -e "require('fs').writeFileSync('/tmp/corpus.json','[]')"
+        # generate.py is PYTHON. It was invoked with node, which failed,
+        # and the `||` fallback then wrote an EMPTY corpus:
+        #
+        #   node -e "require('fs').writeFileSync('/tmp/corpus.json','[]')"
+        #
+        # So the oracle compared NOTHING and reported success. The
+        # fallback existed to keep the job green, and that is exactly
+        # what it did -- it turned a broken setup into a green badge
+        # over an empty corpus.
+        #
+        # There is no fallback now. If the corpus cannot be generated,
+        # the job fails.
+        run: |
+          python3 ../gitpp-cross-port/generate.py /tmp/corpus.json
+          python3 -c "
+import json, sys
+recs = json.load(open('/tmp/corpus.json'))
+print('  %d record(s) in the corpus' % len(recs))
+if len(recs) < 1000:
+    print('FAIL: the corpus has only %d record(s)' % len(recs))
+    sys.exit(1)
+"
       - name: one pass
         env:
           ORACLE_CORPUS: /tmp/corpus.json
