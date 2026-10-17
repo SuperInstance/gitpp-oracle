@@ -19,19 +19,43 @@ jobs:
         with: { dotnet-version: '9.0.x' }
       - name: clone the ports and suites as siblings
         run: |
-          git clone --depth 1 https://github.com/SuperInstance/gitpp-doctor          ../gitpp-doctor
-          git clone --depth 1 https://github.com/SuperInstance/gitpp-js              ../gitpp-js
-          git clone --depth 1 https://github.com/SuperInstance/gitpp-cs             ../gitpp-cs
-          git clone --depth 1 https://github.com/SuperInstance/gitpp-pl             ../gitpp-pl
-          git clone --depth 1 https://github.com/SuperInstance/gitpp-c              ../gitpp-c
-          git clone --depth 1 https://github.com/SuperInstance/gitpp-cross-port     ../gitpp-cross-port
-          git clone --depth 1 https://github.com/SuperInstance/gitpp-fold-conformance ../gitpp-fold-conformance
+          # The token is EMBEDDED. Without it git falls back to an
+          # interactive credential prompt, and a CI runner has no terminal:
+          #
+          #   fatal: could not read Username for 'https://github.com':
+          #          No such device or address
+          #
+          # which is an unhelpful way to say "authentication failed".
+          #
+          # And the python port's repository is `git.pp-doctor` --
+          # `gitpp-doctor` is a DIRECTORY NAME, not a repository. Cloning
+          # it 404s, and the 404 is what makes git ask for credentials in
+          # the first place. Both bugs had to be fixed for this step to
+          # work at all.
+          git clone --depth 1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/SuperInstance/git.pp-doctor        ../gitpp-doctor
+          git clone --depth 1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/SuperInstance/gitpp-js            ../gitpp-js
+          git clone --depth 1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/SuperInstance/gitpp-cs           ../gitpp-cs
+          git clone --depth 1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/SuperInstance/gitpp-pl           ../gitpp-pl
+          git clone --depth 1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/SuperInstance/gitpp-c            ../gitpp-c
+          git clone --depth 1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/SuperInstance/gitpp-cross-port   ../gitpp-cross-port
+          git clone --depth 1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/SuperInstance/gitpp-fold-conformance ../gitpp-fold-conformance
       - name: build the C port
         working-directory: ../gitpp-c
         run: gcc -O2 -o CLleaf CLleaf.c -lm
       - name: build the C# wrapper
         working-directory: ../gitpp-cross-port
         run: dotnet build CsLeaf
+      - name: every participant must be present
+        # A participant that cannot run must be a FAILURE, not a silently
+        # smaller set: a run over four ports reports the same pass count
+        # as a run over five.
+        run: |
+          test -f ../gitpp-doctor/gitpp_doctor.py
+          test -f ../gitpp-js/src/gitpp.js
+          test -f ../gitpp-pl/lib/Gitpp.pm
+          test -f ../gitpp-c/gitpp
+          test -d ../gitpp-fold-conformance
+          echo "  all participants present"
       - name: generate the corpus
         run: node ../gitpp-cross-port/generate.py /tmp/corpus.json || node -e "require('fs').writeFileSync('/tmp/corpus.json','[]')"
       - name: one pass
