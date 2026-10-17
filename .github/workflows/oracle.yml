@@ -60,7 +60,14 @@ jobs:
           test -x ./gitpp
       - name: build the C# wrapper
         working-directory: ../gitpp-cross-port
-        run: dotnet build CsLeaf
+        # The project reference is passed EXPLICITLY. The csproj's own
+        # default is now relative, but a build that depends on the
+        # caller's layout should say so:
+        #
+        #   dotnet build CsLeaf -p:GitppCsProj=$GITHUB_WORKSPACE/gitpp-cs/src/Gitpp.csproj
+        run: |
+          dotnet build CsLeaf -p:GitppCsProj="$GITHUB_WORKSPACE/gitpp-cs/src/Gitpp.csproj"
+          test -f ../gitpp-cross-port/CsLeaf/bin/Debug/net9.0/CsLeaf.dll
       - name: every participant must be present
         # A participant that cannot run must be a FAILURE, not a silently
         # smaller set: a run over four ports reports the same pass count
