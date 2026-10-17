@@ -34,6 +34,13 @@ const PORTS = [
   { name: "cs",     dir: sib("gitpp-cs"),     kind: "both" },
   { name: "pl",     dir: sib("gitpp-pl"),     kind: "both" },
   { name: "c",      dir: sib("gitpp-c"),      kind: "leaf" },
+  // The hub is the reference, not a port. It belongs here precisely BECAUSE
+  // of that: the five ports agreeing with each other says nothing about
+  // whether the thing they were ported from agrees with them. Measured
+  // 2026-10-16: the hub diverges from all five on 448 of 20,043 records,
+  // because pyNumber() still tests 1e21 where §3 says 1e16
+  // (patchwork-quilt/git.pp-ng#28).
+  { name: "hub",    dir: sib("hub"),          kind: "leaf", optional: true },
 ];
 const SUITES = {
   leaf: { dir: sib("gitpp-cross-port"),       bin: "node", script: "fuzz.mjs",

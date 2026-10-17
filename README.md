@@ -70,6 +70,34 @@ usefully, *"it went red exactly when `gitpp-pl` moved to f411bde."*
 currently green, every new divergence with first-seen/last-seen/count, and
 per-port version drift.
 
+## It measures the reference too
+
+The suite runs five *ports*. That is a claim about five ports, and it says
+nothing about the reference they were all ported from — which is the thing
+that was never in the set, and the thing that turns out to diverge.
+
+The leaf suite now measures the hub as a sixth participant and reports the two
+numbers separately:
+
+```
+  ports     : 20043/20043 agree with each other
+  hub (ref) : 19595/20043 agree with the ports
+```
+
+Reported separately on purpose. Folding the reference into one `agree` count
+would make five conformant ports look broken because the reference diverges,
+which is the opposite of what the suite is for. The ports are the subject; the
+hub is what they are measured against.
+
+The hub is compiled with `tsc` to ESM and imported by `hubleaf.mjs`. Set
+`HUB_BUILD` to the compiled `fold.js`; when it is absent the runner is not
+registered, and an **absent reference is reported as absent, not as agreeing**.
+
+The Elixir port (`patchwork-quilt/gitpp-beam`) is not measured — there is no
+BEAM toolchain here. Its divergence is static-analysis only and is filed as
+[gitpp-beam#2](https://github.com/patchwork-quilt/gitpp-beam/issues/2). It is
+listed here so the gap is visible rather than forgotten.
+
 ## Run
 
 ```bash
