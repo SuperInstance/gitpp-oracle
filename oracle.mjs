@@ -37,7 +37,7 @@ const PORTS = [
 ];
 const SUITES = {
   leaf: { dir: sib("gitpp-cross-port"),       bin: "node", script: "fuzz.mjs",
-          args: [process.env.ORACLE_CORPUS || "/tmp/oracle-corpus.json"] },
+          args: [process.env.ORACLE_CORPUS || "/tmp/corpus.json"] },
   fold: { dir: sib("gitpp-fold-conformance"), bin: "node", script: "run.mjs", args: [] },
 };
 

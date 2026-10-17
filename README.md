@@ -90,13 +90,18 @@ node oracle.mjs ledger           # summary
 `/tmp/oracle-corpus.json`, 500 records). `ORACLE_TIMEOUT_MS` sets the
 per-suite timeout (default 1,800,000 = 30 min).
 
-**Corpus size is the throughput knob, and it bites.** The first real run
-used the full 20,043-record corpus: fold came back green in 27.8s while
-leaf hit the 15-minute timeout and was reported as a failure. That is
-the fail-closed contract working — an unrunnable suite is a failure,
-not a pass — but it also means a full-corpus pass needs a longer
-timeout or a batched runner, and until then the honest cadence is a
-500-record sample on a short cycle plus a full sweep on a long one.
+**Corpus size used to be the throughput problem, and it was the runner's
+fault, not the ports'.** The first real run used the full 20,043-record
+corpus: fold came back green in 27.8s while leaf hit the 15-minute
+timeout. The cause was five process spawns *per record* — 100,215 spawns
+for the corpus, at ~0.55s each. The ports themselves are microseconds.
+
+Batching the runner fixed it: the full corpus now runs in **37 seconds**,
+so the default moved from a 500-record sample to the whole thing.
+Sampling was solving a problem that no longer existed — and sampling is
+precisely what hid two real bugs (`code_point_cmp`'s `$a`/`@a` shadowing
+and its inverted prefix case), both of which only surface on keys sharing
+a prefix or containing non-ASCII, i.e. the tail of the corpus.
 
 ## What hardware would add
 
