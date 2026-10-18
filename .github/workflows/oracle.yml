@@ -9,6 +9,16 @@ jobs:
   run:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # The workflow's default token is READ-ONLY in this repo
+    # (actions/permissions/workflow: default_workflow_permissions=read), so
+    # without this the ledger commit below is a push of nothing.
+    permissions:
+      contents: write
+    # The job now pushes. Two overlapping runs racing to push the ledger is a
+    # rejected push, not a memory.
+    concurrency:
+      group: oracle-${{ github.ref }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -131,6 +141,18 @@ jobs:
               print('FAIL: the corpus has only %d record(s)' % len(recs))
               sys.exit(1)
           "
+      - name: ledger baseline
+        # What the ledger held BEFORE this run. The assertion below compares
+        # against this and not against zero: once the ledger is committed,
+        # "the file is non-empty" is true forever, and a run that recorded
+        # nothing would pass it on yesterday's rows.
+        #
+        # Counted exactly the way `summarise` counts rows, or the two numbers
+        # could disagree at the boundary.
+        run: |
+          BEFORE="$(node -e 'let n=0;try{const t=require("fs").readFileSync("ledger.jsonl","utf8");n=t.trim().split("\n").filter(Boolean).length}catch{};process.stdout.write(String(n))')"
+          echo "  ledger holds $BEFORE row(s) before this run"
+          echo "LEDGER_BEFORE=$BEFORE" >> "$GITHUB_ENV"
       - name: one pass
         # The participants' OWN environment. Every port is resolved at
         # run time by the suite it belongs to, and the suites default
@@ -155,6 +177,81 @@ jobs:
       - name: ledger summary
         if: always()
         run: node oracle.mjs ledger
+      - name: the ledger must hold THIS run
+        # The half that matters. `ledger` above prints {"runs": 0} and exits 0,
+        # and the job went GREEN like that for every scheduled run since the
+        # oracle was written -- a scorer holding no memory of a single previous
+        # run. This step is what a green badge now has to answer to.
+        #
+        # `always()`, deliberately: if `one pass` died before appending -- an
+        # unparseable known-limitations.json, a full disk, a kill -- the job
+        # goes RED here instead of reporting a run that recorded nothing.
+        if: always()
+        run: node oracle.mjs assert "$LEDGER_BEFORE"
+      - name: record the ledger
+        # The witness log, committed. Two destinations, because one is not
+        # enough:
+        #
+        #   ledger branch -- EVERY run, one commit, force-pushed. Full
+        #     six-hourly resolution at constant history cost. 1,460 runs a
+        #     year do not have to become 1,460 commits.
+        #   main -- ONCE A DAY, on the first run of a new UTC day, sweeping
+        #     every row accumulated since the last one. main is where a reader
+        #     lands, and it has to stay readable: a witness log that buries the
+        #     commits carrying the thought is not a memory.
+        #
+        # Authored by an explicit bot identity, never the runner's token
+        # identity, so the log is greppable with
+        # `git log --author=gitpp-oracle`. Dated by the LAST ROW's own
+        # timestamp rather than by the push, so the history is stable and a
+        # re-run of the sweep reproduces it.
+        if: always()
+        env:
+          ORACLE_AUTHOR_NAME: gitpp-oracle[bot]
+          ORACLE_AUTHOR_EMAIL: gitpp-oracle@superinstance.dev
+        run: |
+          set -euo pipefail
+          test -s ledger.jsonl || { echo "  no ledger to record"; exit 0; }
+
+          # <timestamp> <rows> <green|RED>, counted the way summarise counts.
+          read -r STAMP ROWS STATE <<< "$(node -e 'const l=require("fs").readFileSync("ledger.jsonl","utf8").trim().split("\n").filter(Boolean);const last=JSON.parse(l[l.length-1]);process.stdout.write(last.at+" "+l.length+" "+((last.newDivergences||[]).length?"RED":"green"))')"
+          echo "  newest row $STAMP, $ROWS row(s) total, $STATE"
+
+          # main's OWN newest committed row, which is what decides whether today's
+          # sweep has happened yet. Comparing the newest row in the FILE against
+          # today never fires -- the newest row is always from today. This is the
+          # question "has main's copy fallen a day behind?", and it is stateless:
+          # main's ledger IS the state.
+          HEAD_LAST="$(git show HEAD:ledger.jsonl 2>/dev/null)" || HEAD_LAST=""
+          HEAD_DAY="$(printf '%s' "$HEAD_LAST" | tail -n 1 | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s.trim()).at.slice(0,10))}catch{}})')"
+          TODAY="$(date -u +%F)"
+
+          git config user.name "$ORACLE_AUTHOR_NAME"
+          git config user.email "$ORACLE_AUTHOR_EMAIL"
+          git add ledger.jsonl
+
+          # 1. the witness branch: one commit, no history growth.
+          BLOB="$(git hash-object -w ledger.jsonl)"
+          TREE="$(printf '100644 blob %s\tledger.jsonl\n' "$BLOB" | git mktree)"
+          WITNESS="$(GIT_AUTHOR_DATE="$STAMP" GIT_COMMITTER_DATE="$STAMP" \
+            git commit-tree "$TREE" -m "ledger: $ROWS run(s) to $STAMP, $STATE")"
+          git push --force --quiet origin "$WITNESS:refs/heads/ledger"
+          echo "  ledger branch: $WITNESS"
+
+          # 2. main: one rollup a day, so it stays readable.
+          if [ -n "$HEAD_DAY" ] && [ "$HEAD_DAY" = "$TODAY" ]; then
+            echo "  main: swept today already ($HEAD_DAY) -- every run since is on the ledger branch"
+          elif git diff --cached --quiet; then
+            echo "  main: ledger unchanged, nothing to commit"
+          else
+            GIT_COMMITTER_DATE="$STAMP" git commit -q \
+              --author="$ORACLE_AUTHOR_NAME <$ORACLE_AUTHOR_EMAIL>" --date="$STAMP" \
+              -m "ledger: $ROWS run(s) to $STAMP, $STATE" \
+              -m "Append-only witness log, swept once a day. The full per-run copy is on the ledger branch, where every six-hourly run lands as a single force-pushed commit."
+            git push --quiet origin HEAD:main \
+              || { git pull --rebase --quiet origin main && git push --quiet origin HEAD:main; }
+            echo "  main: $(git rev-parse --short HEAD)"
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:

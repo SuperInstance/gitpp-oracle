@@ -1,1 +1,9 @@
-ledger.jsonl
+# ledger.jsonl is NOT ignored. It is tracked: it is the oracle's witness log,
+# and a scorer that cannot remember must not be able to report green.
+#
+# What IS ignored is the LOCAL ledger. `oracle.mjs watch` writes to
+# ledger.local.jsonl, because a machine with no sibling checkouts writes a row
+# where every port is "unknown" and every suite is "missing" -- which
+# `summarise` would then read as version drift on every port. The witness log
+# must hold runs, not the shape of a laptop.
+ledger.local.jsonl
