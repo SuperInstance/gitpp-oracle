@@ -66,7 +66,20 @@ jobs:
         #
         #   dotnet build CsLeaf -p:GitppCsProj=$GITHUB_WORKSPACE/gitpp-cs/src/Gitpp.csproj
         run: |
-          dotnet build CsLeaf -p:GitppCsProj="$GITHUB_WORKSPACE/gitpp-cs/src/Gitpp.csproj"
+          # The ABSOLUTE path of the port, computed from where it was
+          # actually cloned.
+          #
+          # It used to be $GITHUB_WORKSPACE/gitpp-cs/src/Gitpp.csproj,
+          # which is one level too deep: the clone step runs
+          # `git clone ... ../gitpp-cs` with the working directory at
+          # $GITHUB_WORKSPACE, so the port lands at
+          # $GITHUB_WORKSPACE/../gitpp-cs -- ONE LEVEL UP.
+          #
+          # The same off-by-one-level mistake as the negctl workflow's
+          # GITPP_C_BIN. The fix is the same too: derive the path from
+          # the clone, never from an assumption about the layout.
+          GITPP_CS_DIR="$(cd ../gitpp-cs && pwd)"
+          dotnet build CsLeaf -p:GitppCsProj="$GITPP_CS_DIR/src/Gitpp.csproj"
           test -f ../gitpp-cross-port/CsLeaf/bin/Debug/net9.0/CsLeaf.dll
       - name: every participant must be present
         # A participant that cannot run must be a FAILURE, not a silently
