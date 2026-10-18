@@ -117,7 +117,24 @@ jobs:
               sys.exit(1)
           "
       - name: one pass
+        # The participants' OWN environment. Every port is resolved at
+        # run time by the suite it belongs to, and the suites default
+        # to the layout of one machine. These are derived from the
+        # clones, not from an assumption about the layout.
+        #
+        # Without them the python participant raised
+        #     ModuleNotFoundError: No module named 'gitpp_doctor'
+        # and the fold suite reported 0/29, because the C port had no
+        # binary to run and the perl port had no module path.
+        #
+        # A run over zero participants reports the same pass count as a
+        # run over five.
         env:
+          GITPP_DOCTOR_DIR: ${{ github.workspace }}/../gitpp-doctor
+          GITPP_JS_SRC: ${{ github.workspace }}/../gitpp-js/src/gitpp.js
+          GITPP_PL_DIR: ${{ github.workspace }}/../gitpp-pl
+          GITPP_C_BIN: ${{ github.workspace }}/../gitpp-c/gitpp
+          GITPP_JS: ${{ github.workspace }}/../gitpp-js/src/gitpp.js
           ORACLE_CORPUS: /tmp/corpus.json
         run: node oracle.mjs run
       - name: ledger summary
