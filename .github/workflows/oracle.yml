@@ -81,6 +81,20 @@ jobs:
           GITPP_CS_DIR="$(cd ../gitpp-cs && pwd)"
           dotnet build CsLeaf -p:GitppCsProj="$GITPP_CS_DIR/src/Gitpp.csproj"
           test -f ../gitpp-cross-port/CsLeaf/bin/Debug/net9.0/CsLeaf.dll
+      - name: build the FOLD suite's C# wrapper
+        # The FOLD suite (gitpp-fold-conformance) has its OWN C# wrapper,
+        # wrappers/CsDerive, and it is a DIFFERENT project from the leaf
+        # suite's CsLeaf. The oracle built only the leaf one, so the fold
+        # suite's C# participant could not load and it reported
+        #
+        #   fold: divergence (0/29)
+        #
+        # -- every case failing on a participant that was never built,
+        # reported as a DIVERGENCE rather than as a missing participant.
+        working-directory: ../gitpp-fold-conformance
+        run: |
+          dotnet build wrappers/CsDerive
+          test -f wrappers/CsDerive/bin/Debug/net9.0/CsDerive.dll
       - name: every participant must be present
         # A participant that cannot run must be a FAILURE, not a silently
         # smaller set: a run over four ports reports the same pass count
@@ -92,6 +106,7 @@ jobs:
           test -f ../gitpp-c/gitpp
           test -x ../gitpp-cross-port/CLleaf
           test -d ../gitpp-fold-conformance
+          test -f ../gitpp-fold-conformance/wrappers/CsDerive/bin/Debug/net9.0/CsDerive.dll
           echo "  all participants present"
       - name: generate the corpus
         # generate.py is PYTHON. It was invoked with node, which failed,
