@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // gitpp-oracle — continuous cross-port differential conformance for git.pp.
 //
-// Three commands:
+// Four commands:
 //   run           one pass, append to the ledger, exit non-zero on a NEW divergence
-//   watch N       loop every N seconds
+//   watch N       loop every N seconds (into the LOCAL ledger, not the witness log)
 //   ledger        summarise the ledger
+//   assert N      the memory assertion: fail unless the ledger holds more than N rows
 //
 // The contract that makes continuous running useful: a divergence listed in
 // known-limitations.json is ACCEPTED and does not fail the run, and the moment
@@ -13,7 +14,9 @@
 //
 // The oracle also records port git SHAs, so "it was green yesterday" is
 // answerable -- which is the whole reason to keep a ledger rather than a
-// pass/fail badge.
+// pass/fail badge. That answer is only worth anything if the ledger survives
+// the run, so ledger.jsonl is TRACKED, the workflow commits it, and the job
+// ASSERTS that it grew (see assertLedger).
 
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -93,7 +96,7 @@ function classify(counts, portName) {
   return "unknown";
 }
 
-export function runOnce({ ledgerPath = "ledger.jsonl", knownPath = "known-limitations.json" } = {}) {
+export function runOnce({ ledgerPath = process.env.ORACLE_LEDGER || "ledger.jsonl", knownPath = "known-limitations.json" } = {}) {
   const known = existsSync(knownPath) ? JSON.parse(readFileSync(knownPath, "utf8")) : { limitations: [] };
   const knownPorts = new Set((known.limitations || []).map((l) => l.port));
   const entry = {
@@ -140,7 +143,7 @@ export function runOnce({ ledgerPath = "ledger.jsonl", knownPath = "known-limita
   return { entry, failed };
 }
 
-export function summarise(ledgerPath = "ledger.jsonl") {
+export function summarise(ledgerPath = process.env.ORACLE_LEDGER || "ledger.jsonl") {
   if (!existsSync(ledgerPath)) return { runs: 0 };
   const rows = readFileSync(ledgerPath, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
   const byKey = new Map();
@@ -168,6 +171,27 @@ export function summarise(ledgerPath = "ledger.jsonl") {
   };
 }
 
+// The memory assertion. A scorer that cannot remember must not be able to
+// report success, so the job asks the ledger whether THIS run is in it.
+//
+// The baseline matters: once the ledger is committed, "the file is non-empty"
+// is true forever, and a run that recorded nothing would sail past that check
+// on yesterday's rows. So this compares against the row count from BEFORE the
+// run, and asks whether the ledger GREW.
+export function assertLedger({ ledgerPath = process.env.ORACLE_LEDGER || "ledger.jsonl", before = 0 } = {}) {
+  const s = summarise(ledgerPath);
+  const grew = s.runs > before;
+  console.log(`  ledger: ${s.runs} row(s), ${before} before this run${s.last ? `, last ${s.last}` : ""}`);
+  if (!grew) {
+    console.error(s.runs === 0
+      ? "\nORACLE: FAIL (the ledger is empty -- this run recorded nothing)"
+      : `\nORACLE: FAIL (the ledger did not grow: ${s.runs} row(s), unchanged since this job started -- this run recorded nothing)`);
+  } else {
+    console.log(`  grew by ${s.runs - before} row(s)`);
+  }
+  return grew ? 0 : 1;
+}
+
 function report({ entry, failed }) {
   const parts = [];
   for (const [k, v] of Object.entries(entry.suites)) {
@@ -186,8 +210,13 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   else if (cmd === "watch") {
     const secs = parseInt(rest[0] || "300", 10);
     console.log(`watching every ${secs}s — ctrl-c to stop`);
-    const tick = () => { try { report(runOnce()); } catch (e) { console.error("  run threw:", e.message); } };
+    // A local ledger, not the witness log: a laptop with no sibling checkouts
+    // records every port as "unknown", which summarise reads as drift.
+    const watchPath = rest[1] || process.env.ORACLE_LEDGER || "ledger.local.jsonl";
+    console.log(`writing to ${watchPath}`);
+    const tick = () => { try { report(runOnce({ ledgerPath: watchPath })); } catch (e) { console.error("  run threw:", e.message); } };
     tick(); setInterval(tick, secs * 1000);
   } else if (cmd === "ledger") console.log(JSON.stringify(summarise(), null, 2));
-  else { console.log("usage: oracle.mjs run | watch [secs] | ledger"); process.exit(2); }
+  else if (cmd === "assert") process.exit(assertLedger({ before: parseInt(rest[0] || "0", 10) || 0 }));
+  else { console.log("usage: oracle.mjs run | watch [secs] | ledger | assert [rowsBefore]"); process.exit(2); }
 }
