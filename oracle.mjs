@@ -84,7 +84,28 @@ function parseCounts(out) {
   return res;
 }
 
-function classify(counts, portName) {
+// A suite that failed because a participant was ABSENT is not a divergence.
+//
+// The suite says so itself -- "FAIL <case>  [participants missing: cs, c]" --
+// and the oracle was throwing that away. It saw "29 fail", called it
+// "divergence", and put it in newDivergences, which is exactly the bucket a
+// human reads to decide WHICH PORT IS WRONG. It would send someone hunting
+// a C# bug that does not exist: two ports were never run, so they cannot
+// disagree with anything.
+//
+// The mirror image of the missing-suite defect, which reported green over
+// nothing. There, absence became SUCCESS; here, absence became CONFLICT.
+// Neither is honest. A thing that was not measured must not be reported as
+// a measurement, in either direction.
+const MISSING_PARTICIPANTS = /participants missing:\s*([^\]\n]+)\]/i;
+
+export function missingParticipantsOf(out) {
+  const m = String(out || "").match(MISSING_PARTICIPANTS);
+  if (!m) return [];
+  return m[1].split(",").map((x) => x.trim()).filter(Boolean);
+}
+
+export function classify(counts, portName) {
   if (counts.fail > 0 || counts.disagree > 0) return "divergence";
   if (counts.errors > 0) return "error";
   if (counts.pass != null || counts.agree != null) return "green";
@@ -105,23 +126,45 @@ export function runOnce({ ledgerPath = process.env.ORACLE_LEDGER || "ledger.json
     suites: {},
     newDivergences: [],
     acceptedDivergences: [],
+    // Things that were NOT MEASURED. Kept apart from newDivergences on
+    // purpose: a suite that did not run is not a disagreement between
+    // ports, and a human reading newDivergences is being told WHICH PORT
+    // IS WRONG.
+    notMeasured: [],
   };
   let failed = false;
 
   for (const [kind, suite] of Object.entries(SUITES)) {
     if (!existsSync(suite.dir)) {
+      // A suite that is not there produced no measurement. That is not a
+      // pass. It used to be: this `continue`d without setting `failed`, so
+      // a run over ZERO suites reported green. A run that measured nothing
+      // is not a passing run.
       entry.suites[kind] = { status: "missing", dir: suite.dir };
+      failed = true;
+      entry.notMeasured.push(`${kind}: the suite directory is absent (${suite.dir})`);
       continue;
     }
     const t0 = Date.now();
     const r = tryRun(suite.dir, suite.bin, [suite.script, ...(suite.args ?? [])]);
     const counts = parseCounts(r.out);
-    const status = classify(counts, "suite");
+    const absent = missingParticipantsOf(r.out);
+    // A participant that was absent makes the result INCOMPLETE, whatever
+    // the counts say. "29 fail" and "29 fail because two ports were not
+    // there" are different facts, and only one of them is about the ports.
+    const status = absent.length ? "incomplete" : classify(counts, "suite");
     entry.suites[kind] = { ...counts, status, exit: r.code, ms: Date.now() - t0,
-                           tail: (r.out || "").trim().split("\n").slice(-3).join(" | ").slice(0, 300), err: r.err || null };
+                           tail: (r.out || "").trim().split("\n").slice(-3).join(" | ").slice(0, 300), err: r.err || null,
+                           missingParticipants: absent.length ? absent : undefined };
 
     const bad = kind === "fold" ? (counts.fail ?? 0) > 0 : (counts.disagree ?? 0) > 0;
-    if (status === "error") { failed = true; entry.newDivergences.push(`${kind}: suite errored, exit ${r.code}`); }
+    if (status === "incomplete") {
+      // Fails the run -- the measurement did not happen, and that is not a
+      // pass -- but it is NOT a divergence, and it must not be filed as one.
+      failed = true;
+      entry.notMeasured.push(`${kind}: participant(s) absent: ${absent.join(", ")}`);
+    }
+    else if (status === "error") { failed = true; entry.newDivergences.push(`${kind}: suite errored, exit ${r.code}`); }
     else if (status === "unknown") {
       failed = true;
       entry.newDivergences.push(`${kind}: runner output could not be parsed (exit ${r.code}) — NOT counted as green`);
@@ -200,7 +243,17 @@ function report({ entry, failed }) {
   console.log(parts.join("\n"));
   if (entry.acceptedDivergences.length) console.log(`  accepted (known): ${entry.acceptedDivergences.join("; ")}`);
   if (entry.newDivergences.length) console.log(`  NEW: ${entry.newDivergences.join("; ")}`);
-  console.log(failed ? "\nORACLE: FAIL (new divergence)" : "\nORACLE: green");
+  if (entry.notMeasured.length) console.log(`  NOT MEASURED: ${entry.notMeasured.join("; ")}`);
+  // Two different failures, and the wording must not blur them. "new
+  // divergence" sends a reader to the ports. "the measurement did not
+  // happen" sends a reader to the build. Conflating them is how a red
+  // badge ends up pointing at the wrong thing for months.
+  if (failed && entry.notMeasured.length && !entry.newDivergences.length)
+    console.log("\nORACLE: FAIL (the measurement did not happen -- this is NOT a port divergence)");
+  else if (failed)
+    console.log("\nORACLE: FAIL (new divergence)");
+  else
+    console.log("\nORACLE: green");
   return failed ? 1 : 0;
 }
 
